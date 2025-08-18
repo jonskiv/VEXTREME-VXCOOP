@@ -5,12 +5,14 @@ Just a little app to help test writes to RAM.
 
 To use this app, you can place it in VEXTREME/roms/DEV/ramwrite.bin
 
-and launch it with an RPC ID 13 call with address specified as follows:
+and call the RAM dump logging with an RPC ID 13 call with addresses to log specified as follows:
 
+```
 $7ff0 - Start Address High Byte
 $7ff1 - Start Address Low  Byte
 $7ff2 -   End Address High Byte
 $7ff3 -   End Address Low  Byte
+```
 
 ```
 ram_dump
