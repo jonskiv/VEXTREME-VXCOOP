@@ -100,6 +100,16 @@ main
         std     $7f14
         ldd     #SM_startDrawHuge16_d
         std     $7f16
+        ; startDraw32 MUST be published even though this cart may never
+        ; choose it: the STM32 handler reads all 13 slots, and the
+        ; dispatcher - not this cart - selects Draw32 for short lines.
+        ; Left unpublished, $7F18 holds whatever the PREVIOUS cart wrote,
+        ; which passes vxtSmartHasDraw32()'s range check because every
+        ; cart links the same engine, and short lines then jump into
+        ; unrelated code - an invisible measuring caret, depending only
+        ; on which cart ran before this one.
+        ldd     #SM_startDraw32_d
+        std     $7f18
         VXT_RPC #VXT_RPC_ID_SMART_ADDRS   ; blocks until the STM32 has stored them
 
         VXT_RPC #VXT_RPC_ID_CAL_INIT      ; one-shot: resets rig state on the
