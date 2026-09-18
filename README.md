@@ -1,4 +1,4 @@
-VEXTREME Vectrex Multicart
+VEXTREME Vectrex Multicart: VXCOOP
 ===
 
 VEXTREME-VXCOOP is a fork of [technobly/VEXTREME](https://github.com/technobly/VEXTREME), the base multicart hardware and firmware. This fork adds VXT, a cooperative dual-CPU game framework built on top of that hardware, plus VX-COOP and a handful of smaller example carts that demonstrate it. That's `code/stm32/vxt/` and `code/app6809/vxt/` (the toolkit itself), `code/stm32/gamelib/` (STM32-side drawing math built on it), the VOOM port (`code/stm32/game/voom_smart.c` and `code/app6809/VOOM/`), and every example cart (`code/stm32/vxcoop/` and `code/app6809/{VXCOOP,test1_led,test6c,test8_cal}/`) — see the [VXT Toolkit](#vxt-toolkit) section further down for the full list. The multicart hardware, the menu, and the base firmware everywhere else in this repo are the upstream project this fork is built on.
