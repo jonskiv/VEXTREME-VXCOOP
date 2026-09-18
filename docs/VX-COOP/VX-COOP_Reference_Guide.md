@@ -330,7 +330,7 @@ hardware or BIOS limit — the BIOS routine accepts 0–127 — and any value of
 above set the flag and was read as a beam reset, so the geometry vanished rather
 than brightening. Put such a flag on bit 7, which a 0–127 range does not use.
 
-**Take a wire format from the code, not from the comment describing it.** VOOM's
+**Wire format shown in code.** VOOM's
 header documents `flags count y1 x1 [y2 x2 …]`, a run-length scheme; the
 assembled code reads `intensity, scale, y, x` with no count field. Where the two
 disagree, only one of them is what the hardware sees.
