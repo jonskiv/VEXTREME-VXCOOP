@@ -131,6 +131,18 @@ static int      cal_overlay = 0;       /* derived from the variant, see above */
 static int32_t  cal_caret_y, cal_caret_x;
 static int      cal_fig_records;              /* cost of the figure alone   */
 
+/* An old analog joystick routinely rests a few units off true center - well
+ * inside CAL_CARET_DEADZONE's own 8-unit margin being exceeded is common,
+ * not a defect in any one unit. calCaretStep()'s fine-control floor (any
+ * reading past the deadzone moves the caret by at least 1 unit/frame) then
+ * turns that rest offset into a constant one-directional creep with the
+ * stick untouched. Sampled once, on this rig's first frame - not in
+ * vxt_cal_init_handler(), which fires before the 6809 has ever called
+ * VXT_INPUT_READ, so parm's joystick bytes are not yet real readings
+ * there. */
+static int8_t   cal_joy_y_center, cal_joy_x_center;
+static int      cal_joy_centered;
+
 /* The ITEM CURSOR - which reference point is currently being measured.
  *
  * This replaces "whichever reference is nearest the caret".
@@ -2551,6 +2563,16 @@ void vxt_cal_handler(uint8_t id, volatile uint8_t *parm)
     uint8_t prevVariant = cal_variant[cal_screen];
     (void)id;
 
+    /* First real frame: capture the stick's resting position as center,
+     * before anything else reads joyX/joyY. Assumes the stick is untouched
+     * immediately after power-on, the same assumption every other joystick
+     * consumer on this rig already makes implicitly. */
+    if (!cal_joy_centered) {
+        cal_joy_y_center = joyY;
+        cal_joy_x_center = joyX;
+        cal_joy_centered = 1;
+    }
+
     /* Skip/record are DISCRETE actions, so they use the raw per-button edge
      * bytes directly. Do NOT switch these to the learn-a-held-bitmask
      * pattern - that fires repeatedly across the ~10 frames one physical
@@ -2669,9 +2691,20 @@ void vxt_cal_handler(uint8_t id, volatile uint8_t *parm)
     }
 
     /* The caret is CONTINUOUS, driven by the stick rather than a button, so
-     * the bitmask pattern does not apply to it. */
-    cal_caret_y += calCaretStep(joyY);
-    cal_caret_x += calCaretStep(joyX);
+     * the bitmask pattern does not apply to it. Deflection is measured from
+     * the sampled rest position, not raw zero - see cal_joy_y_center's own
+     * comment for why an uncorrected rest offset creeps the caret with the
+     * stick untouched. */
+    {
+        int dy = (int)joyY - (int)cal_joy_y_center;
+        int dx = (int)joyX - (int)cal_joy_x_center;
+        if (dy >  127) dy =  127;
+        if (dy < -127) dy = -127;
+        if (dx >  127) dx =  127;
+        if (dx < -127) dx = -127;
+        cal_caret_y += calCaretStep((int8_t)dy);
+        cal_caret_x += calCaretStep((int8_t)dx);
+    }
     if (cal_caret_y >  VXT_BOUNDS_HALF_Y) cal_caret_y =  VXT_BOUNDS_HALF_Y;
     if (cal_caret_y < -VXT_BOUNDS_HALF_Y) cal_caret_y = -VXT_BOUNDS_HALF_Y;
     if (cal_caret_x >  VXT_BOUNDS_HALF_X) cal_caret_x =  VXT_BOUNDS_HALF_X;
@@ -3005,6 +3038,8 @@ void vxt_cal_init_handler(uint8_t id, volatile uint8_t *parm)
         cal_ui_text_cross = cross;
         cal_ui_text_along = along;
     }
+
+    cal_joy_centered = 0;   /* re-sample the stick's rest position next frame */
 
     cal_screen  = CAL_SCR_CENTRE;
     cal_overlay = 0;
