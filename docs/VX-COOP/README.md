@@ -22,7 +22,7 @@ correction and extension as it sees more use.
 > source and its authors where possible, before relying on any of it.  
 > Due to potential misinterpretation on my part, the characterization of
 > certain behaviors may be overly simplified, or just incorrect.  I've
-> just try to document what we've uncovered in case it may be helpful.  
+> just tried to document what we've uncovered in case it may be helpful.  
 
 ## Reading order
 
