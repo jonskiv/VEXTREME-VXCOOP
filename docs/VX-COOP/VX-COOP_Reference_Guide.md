@@ -305,8 +305,7 @@ toolkit rebasable.
 
 ### 2.7 Differences from VOOM's RPC implementation
 
-Sprite_tm's original, `voom.asm`, is 175 lines and establishes the architecture
-correctly. What it lacks is generality.
+Sprite_tm's original, `voom.asm`, is 175 lines and establishes the architecture. This attempt seeks to create generality.
 
 |                         | VOOM (2015)                                                                                                | VXT                                                                                                                                           |
 |-------------------------|------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
