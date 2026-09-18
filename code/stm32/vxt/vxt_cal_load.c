@@ -500,7 +500,21 @@ int vxtCalSaveRow(const char *screen, int32_t variant, int32_t ref,
     if (f_open(&fout, vxt_cal_tmp, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
         return 0;
 
-    haveInput = (f_open(&fin, vxt_cal_csv, FA_READ) == FR_OK);
+    {
+        /* Only an ABSENT file may be treated as "no prior data". Any other
+         * open failure (a busy card, a host that has it mounted) says nothing
+         * about whether calibration exists, and carrying on would write a
+         * one-row file and then unlink+replace the real one - silently
+         * wiping every other row. Refuse instead; the caller just sees a
+         * failed save. */
+        FRESULT fr = f_open(&fin, vxt_cal_csv, FA_READ);
+        haveInput = (fr == FR_OK);
+        if (!haveInput && fr != FR_NO_FILE && fr != FR_NO_PATH) {
+            f_close(&fout);
+            f_unlink(vxt_cal_tmp);
+            return 0;
+        }
+    }
     ok = (f_write(&fout, hdr, sizeof(hdr) - 1, &bw) == FR_OK);
 
     if (haveInput) {

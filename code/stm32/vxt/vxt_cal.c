@@ -2302,11 +2302,22 @@ static int calBuildLogLine(const CalMeas *m, int screen, int variant, int ref,
  * (screen,variant,ref), always the latest value, never ambiguous. Still
  * capped at CAL_MAX_MEAS (64) DISTINCT calibration targets at once - see
  * that constant's own comment - not 64 measurements total. */
+/* Set by calLoadLog() when the log could not be READ for a reason other than
+ * "no such file" (a busy card, the Mac mounting it). calSaveLog() rewrites the
+ * whole file from the in-RAM table with FA_CREATE_ALWAYS, so if the boot load
+ * silently failed the table is empty and the next RECORD would replace a real
+ * measurement log with one row. While this is set, saves are refused. Cleared
+ * by the next successful calLoadLog() (every 6809 boot). */
+static int cal_log_unsafe = 0;
+
 static void calSaveLog(void)
 {
     FIL f;
     UINT bw;
     int scr, v, r;
+
+    if (cal_log_unsafe) return;   /* see cal_log_unsafe above - never clobber
+                                   * a log we could not read */
 
     if (f_open(&f, VXT_CAL_RIG_FILE, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return;
 
@@ -2382,9 +2393,16 @@ static void calLoadLog(void)
     char line[96];
     int first = 1;
 
-    if (f_open(&f, VXT_CAL_RIG_FILE, FA_READ) != FR_OK) return;   /* no prior
-                                    * file yet - fine, cal_meas_n stays 0,
-                                    * same as any other fresh boot */
+    FRESULT fr = f_open(&f, VXT_CAL_RIG_FILE, FA_READ);
+
+    cal_log_unsafe = 0;
+    if (fr != FR_OK) {
+        /* Only a genuinely ABSENT file is "no prior data - fine, cal_meas_n
+         * stays 0, same as any other fresh boot". Any other failure says
+         * nothing about whether a log exists: refuse to overwrite it. */
+        if (fr != FR_NO_FILE && fr != FR_NO_PATH) cal_log_unsafe = 1;
+        return;
+    }
 
     /* Changed for the dense slot table. The old ring needed
      * calMeasUpsert() to collapse duplicate rows for the same
