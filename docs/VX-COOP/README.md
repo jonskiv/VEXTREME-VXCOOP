@@ -24,7 +24,7 @@ correction and extension as it sees more use.
 > certain behaviors may be overly simplified, or just incorrect.  I've
 > just tried to document what we've uncovered in case it may be helpful.  
 
-## Reading order
+## Contents
 
 | Document                                                                 | Contents                                                                                                                   |
 |--------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|
@@ -33,7 +33,7 @@ correction and extension as it sees more use.
 | **[Appendix_B_Reusable_Functions.md](Appendix_B_Reusable_Functions.md)** | Function-level reference, each entry with its constraints.                                                                 |
 | **[Calibration_Rig_Manual.md](Calibration_Rig_Manual.md)**               | A practical, standalone guide to running the calibration rig (`test8_cal`) on real hardware: controls, screens, and the measurement log. |
 
-## The reference application
+## The VX-COOP reference application
 
 Working code for the example techniques the reference guide describes, containing no
 application content and depending on no application layer:
@@ -97,7 +97,7 @@ files side by side, in the order the header comments suggest, is the
 fastest way to see how a real application is split across the two
 processors.
 
-## Two results that govern the design
+## Design structure
 
 **The two processors are serialized.** The STM32 is the ROM while the
 6809 draws, so the two cannot overlap. One millisecond of STM32 time therefore
@@ -112,8 +112,7 @@ produces flicker rather than an incorrect image.
 
 ## Status
 
-The reference application builds without warnings and the 6809 side assembles,
-but **it has not yet been run on hardware.** No simulator exists for
+The reference application builds without warnings and the 6809 side assembles.** No simulator exists for
 ROM-emulation bus timing on this platform, so a clean build does not confirm
 correct behavior — run it on a real unit before relying on any of it.
 
