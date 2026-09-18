@@ -35,7 +35,8 @@ established subsequently by measurement on hardware.
 | Appendix A     | [the VXT library modules](Appendix_A_VXT_Libraries.md)                                                     |
 | Appendix B     | [function-level reference](Appendix_B_Reusable_Functions.md)                                               |
 
-VX-COOP links no application layer. `make vxcoop` sets `VXT_ENABLE_GAME=0`, so
+VX-COOP links no application layer - this fork has none to link. `make vxcoop`
+runs `make clean` and then `make all VXT_ENABLE_VXCOOP=1`, so
 the resulting image comprises the multicart core, the toolkit, and the reference
 handler. Both source files are written to be read in sequence; this reference guide
 supplies the derivations.

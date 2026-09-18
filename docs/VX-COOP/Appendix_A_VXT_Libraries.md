@@ -236,22 +236,12 @@ tests: what occurs when a moving object crosses the screen edge. Carries the
 confirmed extents as `VXT_BOUNDS_HALF_X` (13,500) and `VXT_BOUNDS_HALF_Y`
 (18,000).
 
-### `vxt_scene.c/h` — the element-pool compositor
-Not linked by default (`VXT_ENABLE_SCENE`, default 0), its element pool occupying
-approximately 27,000 bytes of RAM. Retained in the tree so that an open
-investigation into a drawing defect may resume. Build with
-`VXT_ENABLE_SCENE=1` to include it and its sole caller.
-
-### `sha256.c/h`
-Hashing for a build-specific unlock file; not part of the drawing or sound
-toolkit.
-
 ---
 
 ## A.2a `code/stm32/vxcoop/` — the reference application
 
 An application rather than toolkit, and a sibling of the toolkit directories for
-that reason. Gated by `VXT_ENABLE_VXCOOP`, default 0.
+that reason. Gated by `VXT_ENABLE_VXCOOP`, default 1 in this fork's Makefile.
 
 | File                       | Contents                                                                       |
 |----------------------------|--------------------------------------------------------------------------------|
@@ -312,23 +302,28 @@ dependency, so a stale relink produces an image matching neither configuration.
 | Gate                | Default            | Effect                                                                                           |
 |---------------------|--------------------|--------------------------------------------------------------------------------------------------|
 | `USE_HW`            | **none; required** | `v0.1`, `v0.2` or `v0.3`. Compile-time; the wrong value waits on a signal that is never asserted |
-| `VXT_ENABLE_GAME`   | 1                  | link the application layer. **0 yields the toolkit alone**                                       |
-| `VXT_ENABLE_VXCOOP` | 0                  | link the reference handler (RPC 78/79)                                                           |
+| `VXT_ENABLE_VXCOOP` | 1                  | link the reference handler (RPC 78/79)                                                           |
 | `VXT_ENABLE_CAL`    | 1                  | link the calibration rig (RPC 75/76)                                                             |
-| `VXT_ENABLE_SCENE`  | 0                  | link the `vxt_scene` compositor (~27KB RAM)                                                      |
-| `VXT_ENABLE_VOOM`   | 0                  | link the VOOM-on-SmartList port                                                                  |
+| `VXT_ENABLE_VOOM`   | 1                  | link the VOOM-on-SmartList port                                                                  |
 | `USE_UF2`           | 0                  | UF2 rather than DFU link layout                                                                  |
 
-Convenience targets bundling the required clean:
+This fork has no application layer to gate (that is what `VXT_ENABLE_GAME`
+controls in the working repository this toolkit was extracted from), and
+does not ship `vxt_scene.c` (an experimental element-pool compositor) or
+`sha256.c` (a private-repo unlock-file hash) - both are working-repo-only
+and neither has a counterpart here. A plain `make all USE_HW=v0.3`
+therefore already builds every module this fork contains: VX-COOP, VOOM,
+and the calibration rig, all at once.
+
+Convenience target bundling the required clean:
 
 ```bash
-make vxcoop USE_HW=v0.3     # clean, then VXT_ENABLE_GAME=0 VXT_ENABLE_VXCOOP=1
+make vxcoop USE_HW=v0.3     # clean, then make all VXT_ENABLE_VXCOOP=1
 ```
 
-**A note on RAM, since it constrains what can be built.** In a full application
-build the board is approximately 99.5 percent full, and **the stack consists only
-of what remains between `_ebss` and the top of RAM**, which is a few hundred
-bytes. Adding a shared scratch array is therefore not free, and the margin must be
+**A note on RAM, since it constrains what can be built.** **The stack
+consists only of what remains between `_ebss` and the top of RAM**, so
+adding a shared scratch array is not free, and the margin must be
 re-measured after any change to `.bss`:
 
 ```bash
@@ -336,11 +331,19 @@ grep -E '_ebss' stm32.map                              # compare against RAM top
 arm-none-eabi-objdump -d <your>.o | grep 'sub.*sp, #'  # per-function frame sizes
 ```
 
-A toolkit-only build has considerably more room. Measured on the image built for
-this documentation: `text` 95,387, `data` 2,612, `bss` 111,177, leaving
-approximately **15.9 KB** between `_ebss` and the top of RAM. Where the margin is
-narrow, prefer the narrowest type that suffices — an `int16_t` in units of eight
-rather than a `float`, where the additional precision is not required.
+Measured on this fork's own two configurations (STM32F411, 128KB RAM):
+
+| Build | `text` | `data` | `bss` | Margin to `_stack` |
+|---|---|---|---|---|
+| Bare toolkit (`VXT_ENABLE_VXCOOP=0 VXT_ENABLE_VOOM=0 VXT_ENABLE_CAL=0`) | 65,599 | 2,572 | 97,453 | ~29.3 KB |
+| Everything linked (`make all`, this fork's defaults) | 160,399 | 2,628 | 111,445 | ~15.6 KB, ~88% of RAM used |
+
+Unlike the working repository this toolkit was extracted from, where a full
+application build leaves only a few hundred bytes of stack, this fork's
+"everything linked" configuration still has real headroom. Where the
+margin is narrow regardless, prefer the narrowest type that suffices — an
+`int16_t` in units of eight rather than a `float`, where the additional
+precision is not required.
 
 **Two further Makefile notes.** `flash-release:` is the first target, so a bare
 `make` invokes it and fails; use `make all USE_HW=v0.3`. And all gates are

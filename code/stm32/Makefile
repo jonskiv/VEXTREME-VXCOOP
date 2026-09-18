@@ -146,6 +146,15 @@ flash-bin:
 
 all: menu.ld docker
 
+# Convenience target bundling the required clean (see the .SECONDARY: note
+# on GATE_ARGS above - flipping a gate needs one). Builds the toolkit plus
+# the VX-COOP reference handler, with no other application layer linked.
+# USE_HW is a command-line override, e.g. `make vxcoop USE_HW=v0.3`, and
+# propagates to the nested $(MAKE) calls automatically.
+vxcoop:
+	$(MAKE) clean
+	$(MAKE) all VXT_ENABLE_VXCOOP=1
+
 docker-build: Dockerfile
 	docker build . -t stm32-build
 
@@ -220,4 +229,4 @@ clean:
 %.flash: %.bin
 	dfu-util -a 0 -d 0483:df11 -s 0x08000000 -D $(*).bin
 
-.PHONY: images clean flash dummy
+.PHONY: images clean flash dummy vxcoop
