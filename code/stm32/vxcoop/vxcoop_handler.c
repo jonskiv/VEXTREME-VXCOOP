@@ -917,6 +917,8 @@ static void vxcSoundStop(void)
 static int16_t vxc_cal_gain = 1000;   /* identity until data says otherwise */
 static int16_t vxc_cal_off_y;
 static int16_t vxc_cal_off_x;
+static int8_t  vxc_cal_text_cross;    /* identity (0) until data says otherwise */
+static int8_t  vxc_cal_text_along;
 static int     vxc_cal_gain_loaded;
 static int     vxc_cal_off_loaded;
 static int     vxc_cal_save_ok = -1;  /* -1 = not attempted this boot */
@@ -927,9 +929,13 @@ static int16_t vxc_cal_candidate = 1000;
 static void vxcCalLoadOnce(void)
 {
     int16_t g, oy, ox;
+    int8_t cross, along;
     if (vxtCalLoadDrawGain(&g)) { vxc_cal_gain = g; vxc_cal_gain_loaded = 1; }
     if (vxtCalLoadOffset(&oy, &ox)) {
         vxc_cal_off_y = oy; vxc_cal_off_x = ox; vxc_cal_off_loaded = 1;
+    }
+    if (vxtCalLoadTextComp(&cross, &along)) {
+        vxc_cal_text_cross = cross; vxc_cal_text_along = along;
     }
     vxc_cal_candidate = vxc_cal_gain;
 }
@@ -1407,6 +1413,29 @@ void vxcoop_handler(uint8_t id, volatile uint8_t *parm)
 
     vxtSmartBegin(VXT_SMART_OFFSET, VXC_REGION_RECORDS);
     gamelibBeamBegin(VXC_POS_SCALE, VXC_DRAW_SCALE);
+
+    /* Re-apply the loaded calibration every frame, on every page - not just
+     * while the CAL page happens to be on screen. gb_draw_gain/gb_move_offset
+     * are sticky statics that gamelibBeamBegin() does NOT reset, so this is
+     * not defending against a per-frame reset; it is defending against a
+     * caller that visits VXC_PAGE_CAL, then leaves, and expects the loaded
+     * (not the last-tried-candidate) values to still be in effect elsewhere.
+     * Without this, any page other than CAL runs at whatever gain the CAL
+     * page's live experimentation last left behind - identity (1000) if CAL
+     * was never visited this boot at all - so a drawn edge and the
+     * independently-repositioned vertex it must meet disagree by the
+     * uncorrected ~4-7% draw-gain error the reference guide's Section 8
+     * describes. vxcPageCal() itself overrides this with the live
+     * vxc_cal_candidate afterward, further down in this same frame. */
+    gamelibBeamSetDrawGain(vxc_cal_gain);
+    gamelibBeamSetOffset(vxc_cal_off_y, vxc_cal_off_x);
+    /* Same reasoning, for text: vxtSmartTextSetSkewComp() is sticky and
+     * nothing else in this file ever called it, so every string drawn here
+     * was rendering with zero skew compensation regardless of what
+     * /calmeas.csv actually measured for this unit - visible as text that
+     * leans, since the per-character horizontal drift this corrects for is
+     * uncorrected without it. */
+    vxtSmartTextSetSkewComp(vxc_cal_text_cross, vxc_cal_text_along);
 
     /* BEAM PRIMING. Measured on hardware, the first element drawn in a frame
      * lands significantly displaced, with 2.5 to 4.8 times the mean error of

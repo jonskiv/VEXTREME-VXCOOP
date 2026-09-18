@@ -27,6 +27,7 @@
 #include "../fatfs/ff.h"
 #include "../flash.h"
 #include "vxt_cal.h"
+#include "vxt_cal_load.h"
 #include "vxt_smart.h"
 #include "vxt_smart_text.h"
 #include "vxt_input.h"
@@ -419,6 +420,16 @@ static int     cal_skip_now;
 static int8_t   cal_text_comp_cross;
 static int8_t   cal_text_comp_along;
 static uint8_t  cal_text_apply_enabled;
+
+/* This rig's OWN general text - titles, labels, the readout - is drawn
+ * uncorrected by default, on purpose: the two lines above are this rig's
+ * live, in-session CANDIDATE for the TEXT H/V screens' own narrow
+ * demonstration, not a general-purpose correction. Loading the machine's
+ * already-SAVED text comp separately, into its own pair below, lets the
+ * rig's own UI read correctly without touching that narrow, carefully
+ * scoped candidate mechanism at all. */
+static int8_t   cal_ui_text_cross;
+static int8_t   cal_ui_text_along;
 
 /* Added, real gap found via direct feedback ("Corr on/off using
  * button2 [has no effect] for the other test"): button 2 has ALWAYS
@@ -2700,6 +2711,20 @@ void vxt_cal_handler(uint8_t id, volatile uint8_t *parm)
      * distances, and that can only be answered against RAW hardware. Set this
      * to 1000 to re-verify the correction instead; leave it 0 to measure. */
     gamelibBeamSetMoveSettle(CAL_RIG_MOVE_SETTLE);
+
+    /* This rig's own general text - titles, labels, the readout - uses the
+     * machine's SAVED text comp (loaded once at boot into
+     * cal_ui_text_cross/along), so it reads correctly regardless of forcing
+     * every DRAWING correction above to identity for measurement purposes.
+     * calScreenText() resets this to (0,0) narrowly around its own live
+     * candidate demonstration on TEXT H/V and restores identity afterward,
+     * not this value - so on those two screens specifically, text drawn
+     * after that demonstration (this frame's readout) reverts to
+     * uncorrected. That is an accepted, narrow limitation, not a defect:
+     * it protects the exact measurement logic this file's own history
+     * shows is easy to contaminate by widening a skew-comp scope. */
+    vxtSmartTextSetSkewComp(cal_ui_text_cross, cal_ui_text_along);
+
     cal_ref_n = 0;   /* references are re-registered by whichever screen runs */
 
     if (cal_overlay && cal_screen != CAL_SCR_CENTRE) calDrawCard(0);
@@ -2969,7 +2994,17 @@ void vxt_cal_handler(uint8_t id, volatile uint8_t *parm)
 void vxt_cal_init_handler(uint8_t id, volatile uint8_t *parm)
 {
     int i;
+    int8_t cross, along;
     (void)id; (void)parm;
+
+    /* Load once, for this rig's own general text only - never touches
+     * cal_text_comp_cross/along, the TEXT H/V screens' own live candidate. */
+    cal_ui_text_cross = 0;
+    cal_ui_text_along = 0;
+    if (vxtCalLoadTextComp(&cross, &along)) {
+        cal_ui_text_cross = cross;
+        cal_ui_text_along = along;
+    }
 
     cal_screen  = CAL_SCR_CENTRE;
     cal_overlay = 0;
@@ -2991,10 +3026,9 @@ void vxt_cal_init_handler(uint8_t id, volatile uint8_t *parm)
     cal_sel = 0;
     for (i = 0; i < CAL_SCR_COUNT; i++) cal_variant[i] = 0;
 
-    /* Added - live text-skew apply/converge state (see its own
-     * header comment above cal_text_comp_cross). Always starts at identity
-     * (0,0)/OFF - Changed (round 2), see calLoadLog()'s own
-     * following comment for why this is no longer auto-seeded from
+    /* Live text-skew apply/converge state (see its own header comment
+     * above cal_text_comp_cross). Always starts at identity (0,0)/OFF - see
+     * calLoadLog()'s own comment below for why this is not auto-seeded from
      * calmeas.csv history. cal_meas_n above is already reset to 0 BEFORE
      * this runs, so calLoadLog() populates it fresh from whatever the SD
      * card already has - not stale in-RAM state from a previous 6809
