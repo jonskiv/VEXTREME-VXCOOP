@@ -74,7 +74,8 @@ CFLAGS += -DVXT_ENABLE_CAL=$(VXT_ENABLE_CAL)
 # VXT_ENABLE_VOOM: link the VOOM-on-vxt_smart port (game/VOOM.c,
 # game/voom_smart.c, vxt/voom_smart_handler.c, game/voom_level_data.S)?
 # Default 1. All seven e1l1 lumps live in flash (28,364 bytes), and
-# VOOM's z-buffer + line list are overlaid on menuData, so there is no
+# VOOM's z-buffer + line list are overlaid on the unserved part of the
+# cart image, so there is no
 # per-frame SD I/O and bss cost is small.
 #
 # Flipping this flag requires `make clean` first - see GATE_ARGS below.

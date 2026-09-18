@@ -5,6 +5,7 @@
 #include "vxt_cal_load.h"
 #include "../fatfs/ff.h"
 #include <math.h>   /* sqrt - ANGLE needs the spoke radius */
+#include <string.h> /* strcmp - is the active source the rig's own file? */
 
 /* Mirrors vxt_cal.c's own CAL_TEXT_LEN[] (the rig's 8/16/24-char TEXT H
  * test rows) - kept in sync by hand, same tradeoff this project already
@@ -16,6 +17,29 @@ static const int VXT_CAL_LOAD_TEXT_LEN[3] = { 8, 16, 24 };
 /* Mirrors vxt_cal.c's own CAL_TEXT_COMP_SCALE_DIV (== vxt_smart_text.c's
  * private VXT_TEXT_SCALE) - same "kept in sync by hand" note. */
 #define VXT_CAL_LOAD_SCALE_DIV  8
+
+/* ---------------------------------------------------------------------------
+ * ACTIVE SOURCE - see vxtCalLoadSetSource() in the header for why the file
+ * and the chord pad travel together, and why every consumer must set this
+ * explicitly at boot instead of inheriting whatever the previous cart left.
+ * Defaults to the rig's own file so an unconverted caller behaves as before.
+ * ------------------------------------------------------------------------ */
+static const char *vxt_cal_csv = VXT_CAL_RIG_FILE;
+static const char *vxt_cal_tmp = VXT_CAL_RIG_TMP;
+static int32_t     vxt_cal_chord_pad = VXT_CAL_RIG_CHORD_PAD;
+/* Only the rig stamps a `method` column (see VXT_CAL_TEXTH_METHOD), so only
+ * the rig's own file is checked for stale TEXT H rows. A game's Cal screen
+ * writes one row per correction and has no older method to go stale. */
+static int         vxt_cal_is_rig = 1;
+
+void vxtCalLoadSetSource(const char *csvPath, const char *tmpPath,
+                         int32_t chordPadR)
+{
+    vxt_cal_csv = csvPath ? csvPath : VXT_CAL_RIG_FILE;
+    vxt_cal_tmp = tmpPath ? tmpPath : VXT_CAL_RIG_TMP;
+    vxt_cal_chord_pad = chordPadR;
+    vxt_cal_is_rig = (strcmp(vxt_cal_csv, VXT_CAL_RIG_FILE) == 0);
+}
 
 /* Parses one comma- or newline-terminated integer field starting at *pos,
  * advances *pos past the field AND its trailing comma (if any) - so a
@@ -43,16 +67,23 @@ int vxtCalLoadTextComp(int8_t *cross, int8_t *along)
     char line[96];
     int first = 1, n = 0;
     float sumCross = 0.0f, sumAlong = 0.0f;
+    /* Each row's START reading, so its END reading can be reduced to the
+     * error of the run alone - see the subtraction below. The rig writes a
+     * row's start before its end (the file is sorted by ref). */
+    int32_t startDy[8][3], startDx[8][3];
+    uint8_t startOk[8][3];
 
-    if (f_open(&f, "/calmeas.csv", FA_READ) != FR_OK) return 0;   /* no
+    memset(startOk, 0, sizeof(startOk));
+
+    if (f_open(&f, vxt_cal_csv, FA_READ) != FR_OK) return 0;   /* no
                                     * calibration data on THIS SD card -
                                     * caller defaults to identity, per
                                     * this function's own header comment */
 
     while (f_gets(line, (int)sizeof(line), &f) != 0) {
         int pos;
-        int32_t ref, card, dy, dx, compY, compX;
-        int row;
+        int32_t variant, ref, card, dy, dx, compY, compX, method;
+        int row, k;
 
         if (first) { first = 0; continue; }   /* header row */
 
@@ -65,9 +96,9 @@ int vxtCalLoadTextComp(int8_t *cross, int8_t *along)
         }
 
         pos = 7;   /* right after "TEXT H," */
-        (void)vxtCalLoadParseField(line, &pos);   /* variant - not needed,
-                                    * the average is taken across every
-                                    * screen position */
+        variant = vxtCalLoadParseField(line, &pos);   /* the average is
+                                    * taken across every screen position;
+                                    * variant only pairs a start with its end */
         ref   = vxtCalLoadParseField(line, &pos);
         card  = vxtCalLoadParseField(line, &pos);
         (void)vxtCalLoadParseField(line, &pos);   /* refY - not needed */
@@ -77,16 +108,43 @@ int vxtCalLoadTextComp(int8_t *cross, int8_t *along)
         (void)vxtCalLoadParseField(line, &pos);   /* records - not needed */
         compY = vxtCalLoadParseField(line, &pos);
         compX = vxtCalLoadParseField(line, &pos);
+        /* skip nrefs, drawgain, movegain, movesettle, session, fw */
+        for (k = 0; k < 6; k++) (void)vxtCalLoadParseField(line, &pos);
+        method = vxtCalLoadParseField(line, &pos);   /* 0 if absent */
+
+        /* A rig row measured with an older TEXT H method (the all-'8'
+         * strings, which overcorrected real text ~2.5x) is stale - skipped,
+         * never averaged with current rows. */
+        if (vxt_cal_is_rig && method != VXT_CAL_TEXTH_METHOD) continue;
 
         if (card != 0) continue;         /* reference-card overlay was on
                                           * for this reading - excluded,
                                           * see this module's own header
                                           * comment */
-        if ((ref & 1) == 0) continue;    /* START reference - no known
-                                          * character count, only END
-                                          * references carry one */
         row = (int)(ref / 2);
         if (row < 0 || row >= 3) continue;   /* defensive - malformed row */
+        if ((ref & 1) == 0) {            /* START reference - no known
+                                          * character count, only END
+                                          * references carry one. Kept
+                                          * to reduce its END to the run. */
+            if (variant >= 0 && variant < 8) {
+                startDy[variant][row] = dy;
+                startDx[variant][row] = dx;
+                startOk[variant][row] = 1;
+            }
+            continue;
+        }
+
+        /* The first glyph's own landing error is a fixed offset, not
+         * per-character drift - dividing it by the character count inflated
+         * the short rows (implied 14/12/10.7 for 8/16/24 chars on real data,
+         * a flat 11.2/11.4/10.0 with it removed). Skew comp never moves the
+         * first glyph, so the start reading is valid either way. A game's Cal
+         * screen writes no start row, so its value is used unchanged. */
+        if (variant >= 0 && variant < 8 && startOk[variant][row]) {
+            dy -= startDy[variant][row];
+            dx -= startDx[variant][row];
+        }
 
         /* Real bug found by applying a lesson learned elsewhere back to
          * this older, already-deployed loader. `dy` alone conflates a RAW
@@ -200,7 +258,7 @@ int vxtCalLoadDrawGain(int16_t *per1000)
     float samp[2][VXT_CAL_LOAD_MAX_SAMP];
     int   n[2]   = { 0, 0 };
 
-    if (f_open(&f, "/calmeas.csv", FA_READ) != FR_OK) return 0;
+    if (f_open(&f, vxt_cal_csv, FA_READ) != FR_OK) return 0;
     while (f_gets(line, (int)sizeof(line), &f) != 0) {
         int v, r, card;
         int32_t ry, rx, dy, dx, cy, cx;
@@ -247,7 +305,7 @@ int vxtCalLoadDrawGain(int16_t *per1000)
  * sync by hand with vxt_cal.c's CAL_ACCUM_PAD_R, same tradeoff as
  * VXT_CAL_LOAD_TEXT_LEN above - and guarded below, since a layout change would
  * make the derived radius implausible rather than subtly wrong. */
-#define VXT_CAL_LOAD_CHORD_PAD_R  2165
+/* Superseded by vxtCalLoadSetSource()'s chordPadR - see the header. */
 
 int vxtCalLoadClosureComp(int16_t *per1000)
 {
@@ -263,7 +321,7 @@ int vxtCalLoadClosureComp(int16_t *per1000)
 
     for (i = 0; i < 14; i++) { has0[i] = has1[i] = 0; rad[i] = 0; }
 
-    if (f_open(&f, "/calmeas.csv", FA_READ) != FR_OK) return 0;
+    if (f_open(&f, vxt_cal_csv, FA_READ) != FR_OK) return 0;
     while (f_gets(line, (int)sizeof(line), &f) != 0) {
         int v, r, card;
         int32_t ry, rx, dy, dx, cy, cx, R;
@@ -271,7 +329,7 @@ int vxtCalLoadClosureComp(int16_t *per1000)
         if (!vxtCalLoadRow(line, "CHORD", &v, &r, &card, &ry, &rx, &dy, &dx, &cy, &cx))
             continue;
         if (v < 0 || v >= 14 || (r != 0 && r != 1)) continue;
-        R = (rx < 0 ? -rx : rx) - VXT_CAL_LOAD_CHORD_PAD_R;
+        R = (rx < 0 ? -rx : rx) - vxt_cal_chord_pad;
         if (R < 1000 || R > 12000) continue;   /* layout moved - do not guess */
         rad[v] = R;
         if (r == 0) { r0dx[v] = dx - cx; has0[v] = 1; }
@@ -309,7 +367,7 @@ int vxtCalLoadOffset(int16_t *offY, int16_t *offX)
     float sampY[VXT_CAL_LOAD_MAX_SAMP], sampX[VXT_CAL_LOAD_MAX_SAMP];
     int n = 0;
 
-    if (f_open(&f, "/calmeas.csv", FA_READ) != FR_OK) return 0;
+    if (f_open(&f, vxt_cal_csv, FA_READ) != FR_OK) return 0;
     while (f_gets(line, (int)sizeof(line), &f) != 0) {
         int v, r, card;
         int32_t ry, rx, dy, dx, cy, cx;
@@ -439,10 +497,10 @@ int vxtCalSaveRow(const char *screen, int32_t variant, int32_t ref,
     rowLen = vxtCalSaveAppendInt(row, rowLen, 0);        /* fw */
     row[rowLen++] = '\n';
 
-    if (f_open(&fout, "/calmeas.tmp", FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
+    if (f_open(&fout, vxt_cal_tmp, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
         return 0;
 
-    haveInput = (f_open(&fin, "/calmeas.csv", FA_READ) == FR_OK);
+    haveInput = (f_open(&fin, vxt_cal_csv, FA_READ) == FR_OK);
     ok = (f_write(&fout, hdr, sizeof(hdr) - 1, &bw) == FR_OK);
 
     if (haveInput) {
@@ -475,7 +533,7 @@ int vxtCalSaveRow(const char *screen, int32_t variant, int32_t ref,
 
     f_sync(&fout);
     f_close(&fout);
-    if (!ok) { f_unlink("/calmeas.tmp"); return 0; }
+    if (!ok) { f_unlink(vxt_cal_tmp); return 0; }
 
     /* Swap the temp file over the original - f_rename() does not overwrite
      * an existing destination, so the old file is unlinked first. Between
@@ -484,7 +542,7 @@ int vxtCalSaveRow(const char *screen, int32_t variant, int32_t ref,
      * button press, never the frame path, same exposure
      * the rig's own calSaveLog() already accepts on every one of its
      * RECORD presses. */
-    f_unlink("/calmeas.csv");
-    if (f_rename("/calmeas.tmp", "/calmeas.csv") != FR_OK) return 0;
+    f_unlink(vxt_cal_csv);
+    if (f_rename(vxt_cal_tmp, vxt_cal_csv) != FR_OK) return 0;
     return 1;
 }

@@ -1254,30 +1254,67 @@ static void calScreenDeflect(uint8_t variant)
 #define CAL_TEXT_ROWS      3
 #define CAL_TEXT_GAP_PERP  2600L
 
-/* Character counts, short to long. The densest glyph ('8', 7 strokes) is used
- * so each row is the worst realistic case for its length rather than a
- * flattering one.
+/* Character counts, short to long, one test string per row.
+ * The strings must be REPRESENTATIVE text, not a worst case. Skew builds up
+ * per STROKE, but the correction is applied per CHARACTER, so a correction is
+ * only right for text with the same strokes-per-character as the text it was
+ * measured on. Measuring on the densest glyph ('8', 7 strokes/char) against
+ * real UI text at ~3 (VX-COOP's own UI averages 2.86) gives a correction
+ * ~2.5x too strong, pushing every real string up and to the right. These run
+ * 3.00/2.88/2.92 strokes/char.
  *
- * THREE rows, not four, and budgeted rather than guessed: '8' costs ~13
- * records per character (7 strokes, but consecutive strokes that already
- * share an endpoint skip their move), so 8+16+24 = 48 chars is ~624 records,
- * plus 6 reference crosses (~144) plus the caret and readout (~380) - about
- * 1150 of the 1536-record budget. A fourth row would have taken it past 1250
- * with the readout's own length varying by screen name, and a silently
- * dropped final row on the LONGEST string would read as a drawing defect,
- * which is the one failure this rig must not produce. Watch N= and OVF. */
+ * Each string also STARTS on a glyph with a real bottom-left corner and ENDS
+ * on one with a real bottom-right corner, so both marks have a visible point
+ * to put the caret on - a letter like V, with no bottom-left corner, or a
+ * trailing space, leaves the mark with nothing to land on.
+ *
+ * Changing any string makes every earlier TEXT H row stale - bump
+ * VXT_CAL_TEXTH_METHOD (vxt_cal_load.h) whenever one changes.
+ *
+ * THREE rows, not four: 8+16+24 = 48 chars at ~6 records each is ~290
+ * records, plus 6 reference ticks and the caret and readout - well inside the
+ * 1536-record budget. Watch N= and OVF. */
 static const int CAL_TEXT_LEN[CAL_TEXT_ROWS] = { 8, 16, 24 };
+static const char *const CAL_TEXT_STRS[CAL_TEXT_ROWS] = {
+    "DAC GAIN",                    /*  8 */
+    "ACCUM BEAM CHAIN",            /* 16 */
+    "ACCUM ANGLE CHAIN LASERS",    /* 24 */
+};
+
+/* Measurement-method version for TEXT H, written into every row's `method`
+ * column. A row taken with an older method is dropped at load (so the
+ * screen shows it as unmeasured and asks for a fresh reading) rather than
+ * mixed with current rows. 0 = the old all-'8' strings. */
+#define CAL_METHOD_TEXTH  VXT_CAL_TEXTH_METHOD   /* vxt_cal_load.h */
+
+/* TEXT V draws the same strings, so it shares TEXT H's method number. Every
+ * other screen is still on its original method, 0. */
+static int calScreenMethod(int scr)
+{
+    return (scr == CAL_SCR_TEXTH || scr == CAL_SCR_TEXTV) ? CAL_METHOD_TEXTH : 0;
+}
+
+/* The error a TEXT H END reference owes to the string's own RUN: its reading
+ * minus the START reference's reading for the same row, when that has been
+ * measured. The start error is a fixed landing offset of the first glyph -
+ * dividing it by the character count as if it were per-character drift
+ * inflated the short rows (implied rate 14/12/10.7 for 8/16/24 chars on real
+ * data, versus a flat 11.2/11.4/10.0 with it removed). Skew comp does not
+ * move the first glyph, so the start reading is valid whether or not the
+ * correction was on. Defined further down, after the slot table. */
+static void calTextRunError(uint8_t variant, int endRef, int32_t dy, int32_t dx,
+                            int32_t *runDy, int32_t *runDx);
 
 /* Screen regions. The user's report is that the correction differs by
  * position, so these deliberately sample the corners AND the middle rather
  * than sweeping one axis. */
 enum { CAL_POS_MID = 0, CAL_POS_TL, CAL_POS_TR, CAL_POS_BL, CAL_POS_BR };
 
-static void calTextFill(char *buf, int n, char c)
+static void calTextFill(char *buf, int row)
 {
     int i;
-    for (i = 0; i < n; i++) buf[i] = c;
-    buf[n] = '\0';
+    for (i = 0; i < CAL_TEXT_LEN[row]; i++) buf[i] = CAL_TEXT_STRS[row][i];
+    buf[i] = '\0';
 }
 
 static void calScreenText(uint8_t variant, int vertical)
@@ -1334,27 +1371,48 @@ static void calScreenText(uint8_t variant, int vertical)
                                     * every time - see this function's own
                                     * fix comment above */
         int32_t perp = (int32_t)r * CAL_TEXT_GAP_PERP;
-        int32_t oy, ox, ey, ex;
+        int32_t oy, ox, ey, ex, inset;
 
+        /* Right-hand regions are pinned at x=10000, not 12000. Uncorrected
+         * text runs long by ~100 units per character on real hardware, so a
+         * 24-character row pinned at 12000 actually ended near x=14200 -
+         * past the caret's own clamp (VXT_BOUNDS_HALF_X, 13500), where its
+         * END mark could not be reached at all. */
         switch (variant) {
         case CAL_POS_TL: oy =  13000; ox = -12000; break;
-        case CAL_POS_TR: oy =  13000; ox =  12000; break;
+        case CAL_POS_TR: oy =  13000; ox =  10000; break;
         case CAL_POS_BL: oy = -12000; ox = -12000; break;
-        case CAL_POS_BR: oy = -12000; ox =  12000; break;
+        case CAL_POS_BR: oy = -12000; ox =  10000; break;
         default:         oy =   4000; ox =  -7000; break;
         }
 
         /* Stack the rows/columns AWAY from the nearest edge, so the third one
          * cannot walk off screen - at TR in vertical mode a naive +perp put
          * the last column at x=17,200 against a 13,500 half-width. */
+        /* The END reference sits on the last glyph's own bottom-right
+         * corner - a point that is actually drawn - not one gap past it
+         * where the next character would begin, which is empty screen and
+         * cannot be marked. Glyph strokes span x = 0..2 while each
+         * character advances 4 (vxt_smart_text.c's VXT_TEXT_WIDTH +
+         * VXT_TEXT_GAP), so the last glyph's right edge sits half an
+         * advance short of `w`. The START reference is the text origin,
+         * the first glyph's bottom-left corner.
+         *
+         * The last glyph has had one fewer per-character advance applied
+         * than the character count the fits divide by; that ~1/len bias is
+         * below the correction's own integer resolution and is left alone
+         * rather than giving the rig and a game's Cal screen two different
+         * divisors. */
+        inset = w / ((int32_t)CAL_TEXT_LEN[r] * 2);
+
         if (vertical) {
             ox += rightSide ? -perp : perp;
             if (endAnchored) oy += w;       /* CW advance is -Y: runs DOWN */
-            ey = oy - w;  ex = ox;
+            ey = oy - w + inset;  ex = ox;
         } else {
             oy += bottomSide ? perp : -perp;
             if (endAnchored) ox -= w;
-            ey = oy;      ex = ox + w;
+            ey = oy;      ex = ox + w - inset;
         }
 
         /* Mark the START independently, so a mis-landed origin can be told
@@ -1371,7 +1429,7 @@ static void calScreenText(uint8_t variant, int vertical)
         }
         vxtSmartTextBegin((int16_t)(oy / CAL_POS_SCALE),
                           (int16_t)(ox / CAL_POS_SCALE));
-        calTextFill(buf, CAL_TEXT_LEN[r], '8');
+        calTextFill(buf, r);
         vxtSmartTextStr(buf);
         if (liveApply) {
             vxtSmartTextSetSkewComp(0, 0);   /* back to identity immediately -
@@ -2082,6 +2140,19 @@ static void calSeedGeomComp(void)
  * correction fitted at one screen position can still be carried to another to
  * test whether it generalizes, which is what TEXT H's five positions exist
  * for. */
+static void calTextRunError(uint8_t variant, int endRef, int32_t dy, int32_t dx,
+                            int32_t *runDy, int32_t *runDx)
+{
+    const CalMeas *st = calMeasSlot(CAL_SCR_TEXTH, variant, endRef - 1);
+
+    *runDy = dy;
+    *runDx = dx;
+    if (st && st->valid) {
+        *runDy -= st->dy;
+        *runDx -= st->dx;
+    }
+}
+
 static void calSeedTextComp(void)
 {
     int k, bestLen = 0;
@@ -2100,11 +2171,15 @@ static void calSeedTextComp(void)
         len = CAL_TEXT_LEN[row];
         if (len <= bestLen)                        continue;
 
-        bestLen   = len;
-        bestCross = (float)m->compY
-                  - (float)m->dy / (float)len / (float)CAL_TEXT_COMP_SCALE_DIV;
-        bestAlong = (float)m->compX
-                  - (float)m->dx / (float)len / (float)CAL_TEXT_COMP_SCALE_DIV;
+        {
+            int32_t runDy, runDx;
+            calTextRunError(cal_variant[cal_screen], k, m->dy, m->dx, &runDy, &runDx);
+            bestLen   = len;
+            bestCross = (float)m->compY
+                      - (float)runDy / (float)len / (float)CAL_TEXT_COMP_SCALE_DIV;
+            bestAlong = (float)m->compX
+                      - (float)runDx / (float)len / (float)CAL_TEXT_COMP_SCALE_DIV;
+        }
     }
 
     if (bestLen > 0) {
@@ -2206,6 +2281,7 @@ static int calBuildLogLine(const CalMeas *m, int screen, int variant, int ref,
     line[i++] = ',';  i = calAppendInt(line, i, m->moveSettle);
     line[i++] = ',';  i = calAppendInt(line, i, (int32_t)m->session);
     line[i++] = ',';  i = calAppendInt(line, i, (int32_t)m->fwStamp);
+    line[i++] = ',';  i = calAppendInt(line, i, calScreenMethod(screen));
     line[i++] = '\n';
     return i;
 }
@@ -2232,12 +2308,12 @@ static void calSaveLog(void)
     UINT bw;
     int scr, v, r;
 
-    if (f_open(&f, "/calmeas.csv", FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return;
+    if (f_open(&f, VXT_CAL_RIG_FILE, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return;
 
     {
         static const char hdr[] = "screen,variant,ref,card,refY,refX,dy,dx,records,"
                                   "compy,compx,nrefs,drawgain,movegain,movesettle,"
-                                  "session,fw\n";
+                                  "session,fw,method\n";
         f_write(&f, hdr, sizeof(hdr) - 1, &bw);
     }
 
@@ -2306,7 +2382,7 @@ static void calLoadLog(void)
     char line[96];
     int first = 1;
 
-    if (f_open(&f, "/calmeas.csv", FA_READ) != FR_OK) return;   /* no prior
+    if (f_open(&f, VXT_CAL_RIG_FILE, FA_READ) != FR_OK) return;   /* no prior
                                     * file yet - fine, cal_meas_n stays 0,
                                     * same as any other fresh boot */
 
@@ -2368,6 +2444,10 @@ static void calLoadLog(void)
         m->moveSettle = (int16_t)calParseField(line, &pos);
         m->session    = (uint16_t)calParseField(line, &pos);
         m->fwStamp    = (uint32_t)calParseField(line, &pos);
+        /* Stale-method rows (a legacy row parses as method 0) are dropped:
+         * the slot stays unmeasured, so the screen asks for a fresh reading,
+         * and the next save leaves the old row out of the file. */
+        if ((int)calParseField(line, &pos) != calScreenMethod(scr)) { m->valid = 0; continue; }
         m->valid      = 1;
 
         /* This boot's session id is one past the highest ever recorded, so
@@ -2745,18 +2825,16 @@ void vxt_cal_handler(uint8_t id, volatile uint8_t *parm)
      * to 1000 to re-verify the correction instead; leave it 0 to measure. */
     gamelibBeamSetMoveSettle(CAL_RIG_MOVE_SETTLE);
 
-    /* This rig's own general text - titles, labels, the readout - uses the
-     * machine's SAVED text comp (loaded once at boot into
-     * cal_ui_text_cross/along), so it reads correctly regardless of forcing
-     * every DRAWING correction above to identity for measurement purposes.
-     * calScreenText() resets this to (0,0) narrowly around its own live
-     * candidate demonstration on TEXT H/V and restores identity afterward,
-     * not this value - so on those two screens specifically, text drawn
-     * after that demonstration (this frame's readout) reverts to
-     * uncorrected. That is an accepted, narrow limitation, not a defect:
-     * it protects the exact measurement logic this file's own history
-     * shows is easy to contaminate by widening a skew-comp scope. */
-    vxtSmartTextSetSkewComp(cal_ui_text_cross, cal_ui_text_along);
+    /* IDENTITY here, before any screen runs - never the loaded UI value.
+     * calScreenText() computes its reference marks through
+     * vxtSmartTextWidthPhys(), which reads the GLOBAL skew state, and those
+     * marks are the measurement targets: they must be NOMINAL. Applying the
+     * loaded correction at this point shifts the TEXT H targets by the correction itself, so the rig measures
+     * the caret against the wrong point, converges to the wrong value, and
+     * records it - which loads into the next boot's correction and shifts the
+     * targets further. The loaded value is applied only around
+     * calDrawReadout() below, the one place this rig draws its own UI text. */
+    vxtSmartTextSetSkewComp(0, 0);
 
     cal_ref_n = 0;   /* references are re-registered by whichever screen runs */
 
@@ -2924,8 +3002,11 @@ void vxt_cal_handler(uint8_t id, volatile uint8_t *parm)
                 if (cal_screen == CAL_SCR_TEXTH && (cal_sel & 1)) {
                     int row = cal_sel / 2;
                     if (row >= 0 && row < CAL_TEXT_ROWS) {
-                        float rawCross = -(float)m->dy / (float)CAL_TEXT_LEN[row] / (float)CAL_TEXT_COMP_SCALE_DIV;
-                        float rawAlong = -(float)m->dx / (float)CAL_TEXT_LEN[row] / (float)CAL_TEXT_COMP_SCALE_DIV;
+                        int32_t runDy, runDx;
+                        float rawCross, rawAlong;
+                        calTextRunError(cal_variant[cal_screen], cal_sel, m->dy, m->dx, &runDy, &runDx);
+                        rawCross = -(float)runDy / (float)CAL_TEXT_LEN[row] / (float)CAL_TEXT_COMP_SCALE_DIV;
+                        rawAlong = -(float)runDx / (float)CAL_TEXT_LEN[row] / (float)CAL_TEXT_COMP_SCALE_DIV;
 
                         if (cal_text_apply_enabled) {
                             /* Correction was ACTIVE for the string just
@@ -3019,7 +3100,14 @@ void vxt_cal_handler(uint8_t id, volatile uint8_t *parm)
     calDrawMeasureAids();
     calDrawCaret();
     gamelibBeamCloseRun();
+    /* This rig's own UI text - title, labels, readout - is all drawn here,
+     * after every measurement figure and reference mark, so the loaded
+     * correction can be applied for readability without ever touching a
+     * measurement target. Restored to identity afterwards so the NEXT frame's
+     * screen dispatch starts nominal. */
+    vxtSmartTextSetSkewComp(cal_ui_text_cross, cal_ui_text_along);
     calDrawReadout();
+    vxtSmartTextSetSkewComp(0, 0);
 
     vxtSmartEnd();
 }
@@ -3040,6 +3128,13 @@ void vxt_cal_init_handler(uint8_t id, volatile uint8_t *parm)
     }
 
     cal_joy_centered = 0;   /* re-sample the stick's rest position next frame */
+
+    /* THIS rig owns /calmeas.csv, and its CHORD rows are padded by its own
+     * CAL_ACCUM_PAD_R. Declared explicitly every boot rather than inherited:
+     * the STM32 is not reset when the 6809 changes carts, so a game cart run
+     * before this one will have pointed the loaders at its own file. */
+    vxtCalLoadSetSource(VXT_CAL_RIG_FILE, VXT_CAL_RIG_TMP,
+                        VXT_CAL_RIG_CHORD_PAD);
 
     cal_screen  = CAL_SCR_CENTRE;
     cal_overlay = 0;

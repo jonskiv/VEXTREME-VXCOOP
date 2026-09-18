@@ -10,7 +10,7 @@
 /* Run one VOOM frame: apply `keys` (VOOM_KEY_* bitmask from VOOM.h), run
  * the renderer, and emit the resulting vector list into the served image
  * at VXT_SMART_OFFSET via vxt_smart. The first call binds VOOM's z-buffer
- * and line list to voom_smart.c's menuData overlay and points the renderer
+ * and line list to voom_smart.c's cart-image overlay and points the renderer
  * at the level lumps in flash (game/voom_level_data.S). No caller-supplied
  * buffer, and - unlike an SD-streaming design - no file I/O on any call,
  * first or otherwise: the STM32 side computes every frame on a hard

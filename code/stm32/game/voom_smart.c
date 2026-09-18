@@ -87,12 +87,18 @@
  * and VOOM.c indexes them directly, exactly as Sprite_tm's original does.
  * No frame-path I/O, no cache, no "is e1l1/ on the card?" failure mode.
  *
- * WHAT IS LEFT IN menuData: only VOOM's z-buffer and 2D line list (10,848
- * bytes). Those are RAM by nature and this build's bss cannot hold them -
- * with them as plain statics, VXT_ENABLE_VOOM=1 overflowed `ram` by 8 bytes
- * and did not link at all. menuData is idle whenever a game cart is running
- * (the same precedent the level-data overlay used to cite), so VOOM's own
- * top-level static RAM is now ~200 bytes.
+ * WHERE THE WORKING RAM LIVES: VOOM's z-buffer and 2D line list (10,848
+ * bytes) are RAM by nature and this build's bss cannot hold them - as plain
+ * statics, VXT_ENABLE_VOOM=1 overflowed `ram` by 8 bytes and did not link.
+ * They are overlaid on the UNSERVED part of the running cart's own 64K
+ * image (see VOOM_ARENA_OFFSET below), so VOOM's own top-level static RAM
+ * stays ~200 bytes.
+ *
+ * They used to sit in menuData, on the reasoning that the menu is idle while
+ * a cart runs. It is not idle across a reset: holding the Vectrex reset
+ * button makes romemu.S serve menuData again, so the BIOS found VOOM's
+ * z-buffer where the menu's header should be, failed its copyright check,
+ * and booted Mine Storm instead of the multicart menu.
  */
 
 #include "VOOM.h"
@@ -101,6 +107,7 @@
 #include "../gamelib/gamelib_beam.h"   /* gamelibRoundToScale() only - the
                                         * pure rounding helper, not gamelib's
                                         * run-mode/gain state machine */
+#include "../vxt/vxt_cal_load.h"       /* this unit's own draw gain/offset */
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -157,11 +164,21 @@ extern const char voom_lump_sidedefs[], voom_lump_sidedefs_end[];
 extern const char voom_lump_nodes[],    voom_lump_nodes_end[];
 
 /* ---------------------------------------------------------------------
- * menuData overlay - z-buffer + line list only. `extern char
- * menuData[20*1024]` MUST match main.c's real definition exactly - an
- * array-vs-pointer mismatch compiles clean but silently misdirects writes.
+ * Cart-image overlay - z-buffer + line list only. `extern char *cartData`
+ * MUST match main.c's real definition (a POINTER to c_and_l.cartData, the
+ * 64K image) exactly - an array-vs-pointer mismatch compiles clean but
+ * silently misdirects writes.
+ *
+ * VOOM's served image uses only 0x0000-0x1FFF: the cart code, then the
+ * SmartList region VXT_SMART_OFFSET..0x2000 (VOOM_REGION_OFFSET below).
+ * 0x4000 up to parmRam's 0x7F00 is never read by the 6809 and never written
+ * by the loader (main.c's hw_ver stamp sits at 0x7FFC), so the arena lives
+ * there. Deliberately NOT mirrored into the upper bank: nothing reads it.
+ * The loader rewrites this whole buffer on the next cart load.
  * --------------------------------------------------------------------- */
-extern char menuData[20*1024];
+extern char *cartData;
+#define VOOM_ARENA_OFFSET 0x4000
+#define VOOM_ARENA_LIMIT  0x7F00
 
 typedef struct {
 	int x;
@@ -181,18 +198,17 @@ typedef struct {
 } VoomArena;
 
 /* +4 for the alignment round-up in voomArena() below. If this fires, VOOM's
- * arena no longer fits in menuData - shrink LINEMAX or grow menuData.
- * Catches a silent RAM regression at compile time instead of silently
- * corrupting whatever follows menuData. */
-_Static_assert(sizeof(VoomArena) + 4 <= sizeof(menuData),
-	"VOOM's menuData overlay no longer fits - shrink LINEMAX or grow menuData");
+ * arena no longer fits in the unserved window - shrink LINEMAX. Catches the
+ * overlap at compile time instead of silently corrupting parmRam's window. */
+_Static_assert(sizeof(VoomArena) + 4 <= VOOM_ARENA_LIMIT - VOOM_ARENA_OFFSET,
+	"VOOM's cart-image overlay no longer fits below 0x7F00 - shrink LINEMAX");
 
-/* menuData is a plain char array, so nothing guarantees the 4-byte
- * alignment VoomArena's `unsigned int zbm[]` needs. It happens to be
- * 4-aligned today; round up anyway rather than depend on that. */
+/* cartData is a plain char array, so nothing guarantees the 4-byte
+ * alignment VoomArena's `unsigned int zbm[]` needs. Round up rather than
+ * depend on it. */
 static VoomArena *voomArena(void)
 {
-	uintptr_t base = ((uintptr_t)menuData + 3u) & ~(uintptr_t)3u;
+	uintptr_t base = ((uintptr_t)(cartData + VOOM_ARENA_OFFSET) + 3u) & ~(uintptr_t)3u;
 	return (VoomArena *)base;
 }
 
@@ -237,6 +253,51 @@ static int32_t voomPhysY(int rawY) { return -(((int32_t)rawY - SIZEY/2) * VOOM_U
 
 static int32_t voomAbs32(int32_t v) { return (v < 0) ? -v : v; }
 
+/* ---------------------------------------------------------------------
+ * CALIBRATION. VOOM emits its own records rather than going through
+ * gamelib's draw helpers, so gamelibBeamSetDrawGain()/SetOffset() never
+ * reach it, and without them its corners do not meet. The same two
+ * corrections are applied here instead:
+ *
+ *   - DRAW GAIN scales every lit delta as emitted (a draw falls short of
+ *     its nominal length by a per-unit fraction). The landing is tracked
+ *     back in NOMINAL units, un-gained, so the next move starts from where
+ *     the beam really is - tracking the emitted value would turn the
+ *     correction itself into drift.
+ *   - CENTER OFFSET moves the nominal origin to the tube's true center.
+ *     After a recenter the beam sits at DAC zero, which in nominal units is
+ *     (-offY,-offX), so the next move carries the offset for free.
+ *
+ * Loaded ONCE, from the rig's /calmeas.csv, in doInitVoom() - VOOM has no
+ * init RPC and must never read the SD card per frame (flicker). Missing or
+ * unusable data leaves identity, so an uncalibrated card draws as before.
+ * The STM32 is not reset on a cart change, so a recalibration takes effect
+ * on VOOM's next power-up.
+ * --------------------------------------------------------------------- */
+static int16_t voomGain = 1000;        /* per thousand, 1000 = identity */
+static int16_t voomOffY, voomOffX;
+
+static int32_t voomGainApply(int32_t v) {
+	if (voomGain == 1000) return v;
+	return (v >= 0) ? ( (v * (int32_t)voomGain + 500) / 1000)
+	                : (-((-v * (int32_t)voomGain + 500) / 1000));
+}
+
+static int32_t voomGainUnapply(int32_t v) {
+	if (voomGain == 1000) return v;
+	return (v >= 0) ? ( (v * 1000 + voomGain / 2) / (int32_t)voomGain)
+	                : (-((-v * 1000 + voomGain / 2) / (int32_t)voomGain));
+}
+
+static void voomCalLoad(void) {
+	int16_t g, oy, ox;
+	/* Named explicitly: the previous cart may have left the loaders
+	 * pointed at its own file. */
+	vxtCalLoadSetSource(VXT_CAL_RIG_FILE, VXT_CAL_RIG_TMP, VXT_CAL_RIG_CHORD_PAD);
+	if (vxtCalLoadDrawGain(&g)) voomGain = g;
+	if (vxtCalLoadOffset(&oy, &ox)) { voomOffY = oy; voomOffX = ox; }
+}
+
 static void voomSetScale(int s) {
 	if (s == voomCurScale) return;
 	voomCurScale = s;
@@ -261,8 +322,8 @@ static void voomRecenter(void) {
 	voomSetScale(VOOM_CLOSE_SCALE);
 	vxtSmartMove(0, 0);
 	vxtSmartRecenter();
-	voomBeamY = 0;
-	voomBeamX = 0;
+	voomBeamY = -(int32_t)voomOffY;   /* DAC zero, in nominal units */
+	voomBeamX = -(int32_t)voomOffX;
 }
 
 /* Blanked reposition to an absolute physical point. */
@@ -280,8 +341,8 @@ static void voomMoveTo(int32_t py, int32_t px) {
  * hardware can reach it. The scale search costs STM32 cycles and zero 6809
  * records - see gb_dispatch_huge()'s derivation in gamelib_beam.c. */
 static void voomDrawTo(int32_t py, int32_t px) {
-	int32_t dy = py - voomBeamY;
-	int32_t dx = px - voomBeamX;
+	int32_t dy = voomGainApply(py - voomBeamY);   /* EMITTED delta */
+	int32_t dx = voomGainApply(px - voomBeamX);
 	int32_t maxAbs, s, need, bestS, bestErr;
 
 	if (dy == 0 && dx == 0) return;
@@ -304,8 +365,8 @@ static void voomDrawTo(int32_t py, int32_t px) {
 
 	voomSetScale((int)bestS);
 	vxtSmartDrawHuge(dy, dx, (uint8_t)bestS);
-	voomBeamY += gamelibRoundToScale(dy, bestS);
-	voomBeamX += gamelibRoundToScale(dx, bestS);
+	voomBeamY += voomGainUnapply(gamelibRoundToScale(dy, bestS));
+	voomBeamX += voomGainUnapply(gamelibRoundToScale(dx, bestS));
 }
 
 /* Was linesDraw() in the vxt_draw original: same nearest-neighbor walk,
@@ -326,6 +387,9 @@ static void linesDraw(void) {
 	voomBeamY = 0;
 	voomBeamX = 0;
 	vxtSmartIntensity(VOOM_INTENSITY);
+	/* The frame opens with the beam at DAC zero - same as after a recenter. */
+	voomBeamY = -(int32_t)voomOffY;
+	voomBeamX = -(int32_t)voomOffX;
 
 	for (i=0; i<lineIdx; i++) {
 		nwr++;
@@ -401,6 +465,7 @@ static void doInitVoom(void) {
 
 	/* Bind BEFORE voomInit()/voomDraw() - see voomBindArena() in VOOM.h. */
 	voomBindArena(a->zbm, a->zbmx);
+	voomCalLoad();   /* one-shot SD read - see the CALIBRATION block */
 	voomInit(dptr, chunkSz);
 	voomInited=1;
 }

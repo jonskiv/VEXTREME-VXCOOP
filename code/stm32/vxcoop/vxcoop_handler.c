@@ -930,6 +930,16 @@ static void vxcCalLoadOnce(void)
 {
     int16_t g, oy, ox;
     int8_t cross, along;
+
+    /* Declare which file these readings come from before touching a loader.
+     * This application is a pure CONSUMER of the standalone rig's own
+     * measurements, so it names the rig's file and the rig's CHORD pad.
+     * Stated explicitly rather than inherited: the STM32 is not reset when
+     * the 6809 changes carts, so whichever cart ran before this one will
+     * have left the loaders pointed at ITS file. A game shipping its own Cal
+     * screen would name its own file here instead - see vxt_cal_load.h. */
+    vxtCalLoadSetSource(VXT_CAL_RIG_FILE, VXT_CAL_RIG_TMP,
+                        VXT_CAL_RIG_CHORD_PAD);
     if (vxtCalLoadDrawGain(&g)) { vxc_cal_gain = g; vxc_cal_gain_loaded = 1; }
     if (vxtCalLoadOffset(&oy, &ox)) {
         vxc_cal_off_y = oy; vxc_cal_off_x = ox; vxc_cal_off_loaded = 1;

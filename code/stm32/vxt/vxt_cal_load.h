@@ -141,4 +141,52 @@ int vxtCalSaveRow(const char *screen, int32_t variant, int32_t ref,
                   int32_t refY, int32_t refX, int32_t dy, int32_t dx,
                   int32_t compY, int32_t compX, int32_t drawGain);
 
+/* ---------------------------------------------------------------------------
+ * WHICH FILE, AND WHOSE GEOMETRY - call once from a one-shot boot-init
+ * handler, before any loader or vxtCalSaveRow() call.
+ *
+ * Two different tools write measurement rows, and they are NOT
+ * interchangeable even though the schema is identical:
+ *
+ *   - The standalone rig (code/app6809/test8_cal) writes RAW samples: a
+ *     12-spoke ANGLE sweep, several CHORD variants, meant to be
+ *     median-fitted across rows.
+ *   - A game's own Cal screen writes ONE row per correction, reverse-derived
+ *     so a loader's own formula reconstructs the value the player converged
+ *     on. One row is correct there BY DESIGN; it is an encoding, not a
+ *     sample.
+ *
+ * Sharing one file lets those collide on identical (screen,variant,ref)
+ * keys - a game's synthetic ANGLE row upserts over one of the rig's real
+ * measured spokes - so each tool gets its own file.
+ *
+ * `chordPadR` is the radial offset between a CHORD row's own refX and the
+ * arc radius it was measured against (|refX| = R + chordPadR). The two
+ * tools do NOT agree on it: the rig pads by 2165, a game may pad by
+ * something else entirely, and assuming the wrong one rescales every
+ * reconstructed closure value by the ratio of the two radii. It therefore
+ * travels with the file selection rather than being a single hardcoded
+ * constant.
+ *
+ * The STM32 is not reset when the 6809 changes carts, so this is sticky
+ * state a previous cart can leave behind: EVERY consumer must set its own
+ * source explicitly at boot rather than relying on the default below.
+ * Passing NULL for either path restores the rig's own default. */
+void vxtCalLoadSetSource(const char *csvPath, const char *tmpPath,
+                         int32_t chordPadR);
+
+/* The rig's own values, for a caller that wants to name them explicitly
+ * rather than hardcode them again. */
+#define VXT_CAL_RIG_FILE        "/calmeas.csv"
+#define VXT_CAL_RIG_TMP         "/calmeas.tmp"
+#define VXT_CAL_RIG_CHORD_PAD   2165
+
+/* The rig's TEXT H measurement-method version, written into every rig row's
+ * trailing `method` column. Bump it whenever the TEXT H strings change: the
+ * rig drops older rows at load (so the screen asks for fresh readings) and
+ * vxtCalLoadTextComp() ignores them. 0 = the original all-'8' strings;
+ * 1 = an interim string set, superseded;
+ * 2 = the three strings in vxt_cal.c's CAL_TEXT_STRS[]. */
+#define VXT_CAL_TEXTH_METHOD    2
+
 #endif /* VXT_CAL_LOAD_H */

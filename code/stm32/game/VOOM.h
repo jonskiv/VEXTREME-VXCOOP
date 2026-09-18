@@ -74,9 +74,9 @@ typedef struct __attribute__((packed)) {
  * full-column shortcut row). Backed by caller-supplied memory rather than
  * bss, because this build does not have 8.4KB of bss to give: as plain
  * static arrays, VXT_ENABLE_VOOM=1 overflowed `ram` by 8 bytes and did not
- * link at all. voom_smart.c points these into its menuData overlay (the
- * menu is idle while a cart runs - the same documented precedent the level
- * data used to rely on).
+ * link at all. voom_smart.c points these into the unserved part of the
+ * running cart's own image (not menuData, which a held reset serves
+ * again - see voom_smart.c).
  *
  * MUST be called before voomInit()/voomDraw() - the pointers are NULL until
  * it is, and nothing checks. */

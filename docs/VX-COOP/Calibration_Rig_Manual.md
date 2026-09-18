@@ -89,7 +89,7 @@ The controls are the same on every screen:
 | SHARED | Two shapes sharing a vertex (does a shared point land in the same place from both figures?) |
 | ANGLE | Direction sweep — error as a function of the angle a line is drawn at |
 | DEFLECT | Absolute-deflection sweep — error as a function of distance from center |
-| TEXT H | Long strings, drawn horizontally |
+| TEXT H | Per-character text skew, measured on three ordinary strings of 8, 16 and 24 characters, drawn horizontally. Mark the START tick on the first letter's bottom-left corner and the END tick on the last letter's bottom-right corner |
 | TEXT V | Long strings, with the console physically rotated onto its side |
 | PRIME | How many beam-priming cycles it takes to remove the first-drawn-element anomaly |
 | REPOS | Reposition-distance sweep across SmartList record boundaries |
@@ -109,3 +109,10 @@ zero."
 The log is per-machine: a CSV pulled from one cartridge describes that
 specific unit's analog behavior and should not be copied onto another
 one's SD card as a shortcut.
+
+Each row ends with a `method` column. When a screen's measurement changes
+(for example, TEXT H's test strings), its method number goes up, and rows
+taken the old way are dropped the next time the rig loads the file: the
+screen shows as unmeasured again, and those items need to be re-recorded.
+Rows written before the column existed read as method 0. TEXT H is
+currently method 2; every other screen is method 0.
