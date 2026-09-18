@@ -7,6 +7,10 @@ Return to the [reference guide](VX-COOP_Reference_Guide.md) ·
 
 **⚠** marks a documented constraint. Read the note before calling.
 
+> See the reference guide's *nota bene* (Section 0): descriptions of prior
+> work here are derived from reading its code, not from its authors, and
+> should be independently validated.
+
 ---
 
 ## B.0 Status notation

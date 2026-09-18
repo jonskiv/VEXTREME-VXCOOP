@@ -14,6 +14,13 @@ covers the toolkit that generalizes it and the constraints on its use. It is a
 starting reference, not a finished or authoritative one, and it will need
 correction and extension as it sees more use.
 
+> **Nota bene.** Anything here describing prior work — VEXTREME's existing
+> firmware, Sprite_tm's original VOOM, or similar — is derived from reading
+> that code, not from its original authors, and may mischaracterize what it
+> actually does or why. Treat those descriptions as one interpretation, not
+> an authoritative account: validate independently, and consult the original
+> source and its authors where possible, before relying on any of it.
+
 ## Reading order
 
 | Document                                                                 | Contents                                                                                                                   |

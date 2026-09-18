@@ -18,6 +18,13 @@ The architecture originates with Sprite_tm's VOOM (2015). This reference guide d
 the toolkit that generalizes it, and the constraints on its use that were
 established subsequently by measurement on hardware.
 
+> **Nota bene.** Anything below describing prior work — VEXTREME's existing
+> firmware, Sprite_tm's original VOOM, or similar — is derived from reading
+> that code, not from its original authors, and may mischaracterize what it
+> actually does or why. Treat those descriptions as one interpretation, not
+> an authoritative account: validate independently, and consult the original
+> source and its authors where possible, before relying on any of it.
+
 **VX-COOP** is the reference application accompanying this reference guide:
 
 |                |                                                                                                            |
