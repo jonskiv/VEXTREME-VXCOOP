@@ -6,10 +6,10 @@ measurement-only tool, how corrections are derived and applied, the log
 file's contract), see the [reference guide](VX-COOP_Reference_Guide.md),
 Section 8.
 
-> **Nota bene.** As with the rest of this documentation set, the
-> descriptions below are derived from reading the rig's own source, not
-> from a separate design document — see the reference guide's own *nota
-> bene* in Section 0.
+> **Nota bene.** This reference application is a demo only.  The process
+> seeks to collect data measures and apply corrective actions in the draw
+> routines.  The corrective measure are only illustrative and not complete
+>  — see the reference guide's own *nota bene* in Section 0.
 
 ---
 
