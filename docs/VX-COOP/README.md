@@ -28,6 +28,7 @@ correction and extension as it sees more use.
 | **[VX-COOP_Reference_Guide.md](VX-COOP_Reference_Guide.md)**             | The reference guide: the protocol, the draw engine, sound, input, projection, occlusion, calibration, and a consolidated rule list. |
 | **[Appendix_A_VXT_Libraries.md](Appendix_A_VXT_Libraries.md)**           | Every toolkit module, the processor it runs on, and its purpose.                                                           |
 | **[Appendix_B_Reusable_Functions.md](Appendix_B_Reusable_Functions.md)** | Function-level reference, each entry with its constraints.                                                                 |
+| **[Calibration_Rig_Manual.md](Calibration_Rig_Manual.md)**               | A practical, standalone guide to running the calibration rig (`test8_cal`) on real hardware: controls, screens, and the measurement log. |
 
 ## The reference application
 
@@ -69,6 +70,29 @@ on-screen text, except on `SOUND` where it triggers an effect. Every page prints
 
 Both source files are written to be read in sequence. Each non-obvious statement
 records the constraint it satisfies.
+
+## Other demonstration files
+
+Four smaller cartridges exercise one piece of the toolkit each, rather than
+the whole thing. Each is a matched pair — a 6809 cartridge and (except for
+`test1_led`, which needs none) an STM32 handler that talks to it over one
+RPC ID:
+
+| Demonstrates | 6809 cartridge | STM32 handler | Prebuilt binary |
+|---|---|---|---|
+| The RPC path itself, against **unmodified** stock firmware (no custom STM32 code) | [`code/app6809/test1_led/main.asm`](../../code/app6809/test1_led/main.asm) | — (uses stock firmware's own RPC 5) | `prebuilt/test1_led.bin` |
+| Multi-channel sound: joystick-selected channel, live tuning, a box count controlled by two buttons | [`code/app6809/test6c/test6c.asm`](../../code/app6809/test6c/test6c.asm) | [`code/stm32/vxt/test6c_handler.c`](../../code/stm32/vxt/test6c_handler.c) | `prebuilt/test6c.bin` |
+| The calibration rig — see [Calibration_Rig_Manual.md](Calibration_Rig_Manual.md) for how to operate it | [`code/app6809/test8_cal/test8_cal.asm`](../../code/app6809/test8_cal/test8_cal.asm) | [`code/stm32/vxt/vxt_cal.c`](../../code/stm32/vxt/vxt_cal.c) + [`vxt_cal_load.c`](../../code/stm32/vxt/vxt_cal_load.c) | `prebuilt/test8_cal.bin` |
+| VOOM, Sprite_tm's Doom-on-Vectrex port, rebuilt on the SmartList draw engine | [`code/app6809/VOOM/VOOM.asm`](../../code/app6809/VOOM/VOOM.asm) | [`code/stm32/game/voom_smart.c`](../../code/stm32/game/voom_smart.c) (the renderer) + [`code/stm32/vxt/voom_smart_handler.c`](../../code/stm32/vxt/voom_smart_handler.c) (the RPC glue) | `prebuilt/VOOM.bin` |
+
+Every pair follows the same handshake described in the reference guide,
+Section 2: the 6809 side is the standard toolkit cart structure
+(address-publish handshake, then a `Wait_Recal`/input/RPC/draw frame loop),
+and all of that cartridge's actual logic lives on the STM32 side, reached
+by the RPC ID(s) each `.asm` file's own header names. Reading a pair's two
+files side by side, in the order the header comments suggest, is the
+fastest way to see how a real application is split across the two
+processors.
 
 ## Two results that govern the design
 

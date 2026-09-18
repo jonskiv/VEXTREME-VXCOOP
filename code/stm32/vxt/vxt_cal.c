@@ -132,7 +132,7 @@ static int      cal_fig_records;              /* cost of the figure alone   */
 
 /* The ITEM CURSOR - which reference point is currently being measured.
  *
- * Added. This replaces "whichever reference is nearest the caret".
+ * This replaces "whichever reference is nearest the caret".
  * Nearest-reference was forgiving but it could not support a SKIP, because
  * there was no notion of a CURRENT item to skip past - and without an explicit
  * cursor there is no way to tell "I looked at this one and could not read it"
