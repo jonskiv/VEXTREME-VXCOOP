@@ -7,7 +7,7 @@ IMPORTANT NOTE: These demo files are intended as a proof of concept, so while th
 
 **For familiarity with the parts of VXCOOP, I suggest to start here: [docs/VX-COOP/](docs/VX-COOP/)** — the reference guide (architecture, protocol, rule definitions) and the function-level reference for what the toolkit provides. The [VXT Toolkit](#vxt-toolkit) section below is a short map of what's in this fork; the docs folder is where it's further explained. Note the *nota bene* near the top of that guide: its descriptions of prior work is determined by reading sample code, not from its authors and should be independently validated - any mischaracterizations are accidental/unintended.
 
-
+---
 We're carrying on and pushing forward the amazing work of [Sprite_tm](http://spritesmods.com/?art=veccart&page=1) and his Extreme Vectrex Multicart. He posted the code (GPLv3 License) and lots of screens of the PCB/initial schematic, but he never released the PCB. It's a great base for an inexpensive and open vectrex multicart, for developers and players alike!
 
 :warning: Please read this NOTICE of Current Development :warning:
