@@ -40,7 +40,7 @@ application content and depending on no application layer:
 
 |                |                                                                                                                                           |
 |----------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| 6809 side      | [`code/app6809/VXCOOP/VXCOOP.asm`](../../code/app6809/VXCOOP/VXCOOP.asm) — the complete 6809 half, approximately sixty instructions       |
+| 6809 side      | [`code/app6809/VXCOOP/VXCOOP.asm`](../../code/app6809/VXCOOP/VXCOOP.asm) — the 6809 half, approximately sixty instructions       |
 | STM32 side     | [`code/stm32/vxcoop/`](../../code/stm32/vxcoop/) — the handler on RPC 78 (per frame) and 79 (boot init), plus the generated music example |
 | Example assets | a three-channel song (`music_example.vpy`, converted offline), an explosion effect, and the toolkit's stroke font                         |
 
@@ -71,14 +71,12 @@ on-screen text, except on `SOUND` where it triggers an effect. Every page prints
 | `INPUT`   | the raw input block, byte by byte                                   |
 | `CAL`     | calibration loaded at boot, applied per frame, saved on a press     |
 
-Both source files are written to be read in sequence. Each non-obvious statement
-records the constraint it satisfies.
+The source files recite the routines sequence. 
 
 ## Other demonstration files
 
-Four smaller cartridges exercise one piece of the toolkit each, rather than
-the whole thing. Each is a matched pair — a 6809 cartridge and (except for
-`test1_led`, which needs none) an STM32 handler that talks to it over one
+Four smaller cartridges demonstrate other pieces of the toolkit each. Each is a matched pair — a 6809 cartridge and (except for
+`test1_led`, which leverages existing code) an STM32 handler that talks to it over one
 RPC ID:
 
 | Demonstrates | 6809 cartridge | STM32 handler | Prebuilt binary |
@@ -91,30 +89,29 @@ RPC ID:
 Every pair follows the same handshake described in the reference guide,
 Section 2: the 6809 side is the standard toolkit cart structure
 (address-publish handshake, then a `Wait_Recal`/input/RPC/draw frame loop),
-and all of that cartridge's actual logic lives on the STM32 side, reached
+and all of that cartridge's logic resides on the STM32 side, reached
 by the RPC ID(s) each `.asm` file's own header names. Reading a pair's two
-files side by side, in the order the header comments suggest, is the
-fastest way to see how a real application is split across the two
+files side by side, in the order the header comments suggest, shows how an application is split across the two
 processors.
 
 ## Design structure
 
 **The two processors are serialized.** The STM32 is the ROM while the
-6809 draws, so the two cannot overlap. One millisecond of STM32 time therefore
+6809 draws. One millisecond of STM32 time 
 costs approximately 38 records of 6809 drawing, and measurement places the STM32
-at 7 to 11 percent of a frame. STM32 cycles should be spent freely and 6809
-records conserved.
+at 7 to 11 percent of a frame. STM32 cycles can be spent freely and 6809
+records ideally conserved.
 
-**There are two record budgets, and they differ by a factor of roughly three.**
+**There are two record budgets, and they differ by an estimate factor of three.**
 1536 records fit in memory, that figure being the distance to the sound block.
-Between 510 and 730 fit in the time available at 50Hz. Exceeding the second
-produces flicker rather than an incorrect image.
+Between 510 and 730 fit in the time available at 50Hz. Exceeding the second begins
+producing flicker.
 
 ## Status
 
 The reference application builds without warnings and the 6809 side assembles.** No simulator exists for
-ROM-emulation bus timing on this platform, so a clean build does not confirm
-correct behavior — run it on a real unit before relying on any of it.
+ROM-emulation bus timing on this platform, so a clean build does not necessarily confirm
+correct behavior — testing on actual hardware is needed.
 
 **License:** GPLv3. Derived from Sprite_tm's `veccart` and VOOM; the SmartList
 draw technique is documented by Malban and attributed there to Kristof.
